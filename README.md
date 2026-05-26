@@ -110,3 +110,60 @@ Se debe modificar el código de los microservicios en NestJS para exponer un end
 
 1. Se debe conectar Grafana a Prometheus.
 2. Se debe crear un Dashboard que muestre métricas y logs clave del servicio seleccionado.
+
+---
+
+## Informe de Implementación
+
+### Servicio instrumentado: `orders-service`
+
+Se implementó observabilidad completa sobre el `orders-service` siguiendo el patrón del `auth-service`.
+
+#### Métricas expuestas (`GET /metrics`)
+
+| Métrica | Tipo | Descripción |
+|---------|------|-------------|
+| `http_requests_total` | Counter | Peticiones HTTP por método, ruta y código de estado |
+| `http_request_duration_seconds` | Histogram | Latencia de peticiones HTTP (p95, p99) |
+| `orders_created_total` | Counter | Órdenes creadas, etiquetadas por `status` (success, rejected_empty, rejected_no_user, rejected_insufficient_stock) |
+| `orders_stock_deductions_total` | Counter | Operaciones de descuento de stock exitosas |
+
+**Proveedor:** `@willsoto/nestjs-prometheus` + `prom-client`
+
+#### Logs estructurados (JSON → Loki)
+
+El servicio emite logs JSON con `service: "orders-service"`. Eventos registrados:
+
+| Evento | Nivel | Campos |
+|--------|-------|--------|
+| `order_created` | info | `orderId`, `userId`, `total`, `itemCount` |
+| `order_creation_failed` | warn | `reason`, `productId` (según el caso) |
+| `orders_queried` | info | `count` |
+| `order_found` / `order_not_found` | info/warn | `orderId` |
+| `stock_deducted` | info | `productId`, `quantity` |
+| `stock_deduction_failed` | warn | `productId`, `quantity` |
+
+**Biblioteca:** `nestjs-pino` + `pino-http`
+
+#### Dashboard de Grafana
+
+`observability/grafana/dashboards/orders-service.json` — 10 paneles:
+
+- 4 stat: órdenes creadas, rechazadas, descuentos de stock, memoria residente
+- 4 timeseries: tasa HTTP, latencia p95, errores 5xx, CPU
+- 1 timeseries: tasa de creación de órdenes + deducciones de stock
+- 1 log panel: logs en vivo del servicio desde Loki
+
+#### Archivos modificados/creados
+
+| Archivo | Cambio |
+|---------|--------|
+| `orders-service/package.json` | Dependencias añadidas |
+| `orders-service/src/observabilidad/metrics.module.ts` | Nuevo — módulo global de métricas |
+| `orders-service/src/observabilidad/http-metrics.interceptor.ts` | Nuevo — interceptor HTTP |
+| `orders-service/src/app.module.ts` | LoggerModule + MetricsModule |
+| `orders-service/src/main.ts` | PinoLogger con bufferLogs |
+| `orders-service/src/orders/orders.service.ts` | Métricas y logs de negocio |
+| `observability/grafana/dashboards/orders-service.json` | Nuevo — dashboard |
+
+La infraestructura (Prometheus, Loki, Promtail, Grafana) no requirió cambios: todo estaba configurado para descubrir automáticamente el nuevo servicio.
